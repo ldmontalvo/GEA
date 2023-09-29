@@ -1,8 +1,12 @@
 # NOTES ON WGS ANALYSES FOR WRENS
 ## By Luis Daniel Montalvo
+
+This repository contains data quality control, read mapping, and genome-environment association analyses for 100 Campylorhynchus individuals sequenced with whole-genome resequencing. The sampled individuals span an environmental gradient of climate variables. The workflows and scripts provided here allow for quality filtering of raw reads, alignment to the reference genome, identification of climate-associated SNPs, and functional characterization of candidate adaptive genes. 
+
 ## Downloading the Reference Genome
+
 1.	We will use the genome of Certhia americana (ASM1869719v1) as the reference genome (https://www.ncbi.nlm.nih.gov/data-hub/genome/GCA_018697195.1/). If we click on “FTP directory for GenBank assembly” we will see the different files we can download including the sequences and annotations.
-2.	We create a directory where we can download the files. In this case my folder is “Reference”.
+2.	We create a directory where we can download the files. In this case, my folder is “Reference”.
 3.	We use the following command line to download the files into our folders.
 rsync --copy-links --times --verbose --recursive rsync://ftp.ncbi.nlm.nih.gov/genomes/all/GCA/018/697/195/GCA_018697195.1_ASM1869719v1/ ./Reference
 More information about downloading NCBI genomes: https://www.youtube.com/watch?v=-X0H024ST8k
@@ -11,11 +15,11 @@ gunzip GCA_018697195.1_ASM1869719v1_genomic.fna.gz
 5.	Creating the indexes for the reference genome. The process took ~10 minutes:
 module load hisat2
 hisat2-build -p 10 -f ./GCA_018697195.1_ASM1869719v1_genomic.fna Certhia_hisat2
-6.	It could be useful to change the files names to make easier the use of loop in bash commands. The lines below could be use with that purpose.
+6.	It could be useful to change the file names to make easier the use of loop in bash commands. The lines below could be used for that purpose.
 for i in *; do mv $i ${i/S*002_/}; done
 this code remove everything (*) from “S” to “002_” and replace it with nothing  (whatever between last “/” and “}”).
 
-7.	I deleted sequences where there is a single Phred score below 10. Then I filtered sequences where 5% of reads have a with Phred quality scores below 20 (using fastq_quality_filter).
+7.	I deleted sequences where there is a single Phred score below 10. Then I filtered sequences where 5% of reads have a Phred quality scores below 20 (using fastq_quality_filter).
 module load fastx_toolkit
 echo "Filter sequences with less than 10 and 20 Phred scores"
 #95% of the bases in a sequence must have a score of more than 20 for the sequence to be kept
@@ -157,7 +161,7 @@ date
 
 vcftools --vcf ../VC/wgs.wrensc55.sort.vcf --missing-indv --out datac55.ed
 
-24.	The imiss file showed all samples with 0% of missing data. However, I used the flag –max-missing 0.8 in vcftools.  I filtered with a minimum allele frequency (maf) of 0.05, produce a file with the alleles in disequilibrium and remove alleles not in HWE using a p-value of 0.01. I used the script WGS11_filter_vcf.sh. Marker quality and other filters were already used in the variant calling. This script can estimate the LD and produce a report and filter by HWE, max-missing and maf if these lines are activated (remove the #).
+24.	The imiss file showed all samples with 0% of missing data. However, I used the flag –max-missing 0.8 in vcftools.  I filtered with a minimum allele frequency (maf) of 0.05, produced a file with the alleles in disequilibrium, and removed alleles not in HWE using a p-value of 0.01. I used the script WGS11_filter_vcf.sh. Marker quality and other filters were already used in the variant calling. This script can estimate the LD and produce a report and filter by HWE, max-missing, and maf if these lines are activated (remove the #).
 
 module load vcftools
 echo "Filtering vcf"
@@ -170,12 +174,12 @@ vcftools --vcf ../VC/wgs.wrens.sort.vcf \
 nohup bash WGS11_filter_vcf.sh &
 date
 
-25.	Transform the filtered vcf to PED format. In this conversion, I am using the file GCA_018697195.1_ASM1869719v1_assembly_report.txt in the Certhia reference genome to make a txt file with the access numbers and the corresponding chromosome name. The file chr.names.txt has the access number in the first column and the chromosome names in the second. With chr.names.txt and the filtered vcf from the previous step, I ran the following line from WGS11_filter_vcf2.sh script.
+25.	Transform the filtered vcf to PED format. In this conversion, I am using the file GCA_018697195.1_ASM1869719v1_assembly_report.txt in the Certhia reference genome to make a Txt file with the access numbers and the corresponding chromosome name. The file chr.names.txt has the access number in the first column and the chromosome names in the second. With chr.names.txt and the filtered vcf from the previous step, I ran the following line from WGS11_filter_vcf2.sh script.
 vcftools --vcf ../ImputationQC/wgs.wrens.filter.vcf --plink --chrom-map ../ImputationQC/chr.names.txt --out ../ImputationQC/wgs.wrensc55.upname
 
 bcftools annotate --rename-chrs ./chr.names.txt wgs.wrensc55.filter.vcf.recode.vcf > wgs.wrensc55.renamedChr.vcf
 
-26.	We got the wgs.wrensc55.upname.ped and wgs.wrensc55.upname.map files from the previous step. We filter now by Linkage Disequilibrium with PLINK. First we get the estimates of R2 and the list of variants to prune.
+26.	We got the wgs.wrensc55.upname.ped and wgs.wrensc55.upname.map files from the previous step. We filter now by Linkage Disequilibrium with PLINK. First, we get the estimates of R2 and the list of variants to prune.
 plink --ped ../ImputationQC/wgs.wrens.upname.ped --map ../ImputationQC/wgs.wrens.upname.map --aec --indep-pairwise 50 5 0.8 --make-bed --out ../ImputationQC/wgs.wren.ld
 
 27.	We got the wgs.wren.ld.bed, wgs.wren.ld.prune.in and wgs.wren.ld.prune.out files from the previous step.  We used these files to filter LD with the following line in script WGS12_filter_LD.sh.
@@ -190,7 +194,7 @@ plink --bfile wgs.wrensc55.filteredLD --allow-extra-chr --recode vcf --out wgs.w
 
 grep -E '^(#|2[[:space:]])' wgs.wrens.named.vcf > wgs.wrens.chr7.vcf
 
-30.	The rest of analyses with LEA is described in the script WGS_LEA.Rmd.
+30.	The rest of the analyses with LEA are described in the script WGS_LEA.Rmd.
 31.	We used these commands to get missing data.
 
 bcftools stats wgs.wrens.named.vcf
@@ -199,11 +203,11 @@ vcftools --vcf wgs.wrens.named.vcf  --missing-indv
 
 vcftools --vcf wgs.wrens.named.vcf  --missing-site
 I got some files for missing data per sample (out.imiss) and per site (out.lmiss)
-32.	We obtained the heterozygosity per sampe with the following line.
+32.	We obtained the heterozygosity per sample with the following line.
 
 plink --vcf wgs.wrens.named.vcf --sample-counts cols=hom,het --allow-extra-chr
 Blasting Candidates Genes
-1.	First I tried the candidates gene for the Radseq data. I’ll work in Visual Studio Code (VSC). I install the necessary package in Ubuntu terminal in VSC such as Anaconda. Install anaconda according to the following website.
+1.	First I tried the candidates gene for the Radseq data. I’ll work in Visual Studio Code (VSC). I installed the necessary package in Ubuntu terminal in VSC such as Anaconda. Install Anaconda according to the following website.
 https://docs.anaconda.com/free/anaconda/install/linux/
 2.	I install Blast+ following the steps at:
 https://www.ncbi.nlm.nih.gov/books/NBK279690/
@@ -211,13 +215,13 @@ https://www.ncbi.nlm.nih.gov/books/NBK279690/
 
 blastn -query sig.snps.fa -db nt -evalue 1e-20 -out blastn.txt -entrez_query "Taeniopygia guttata [ORGN]" -parse_deflines -remote
 
-4.	I can also run a local quenry if I download the reference data. Download the Zebra Finch annotated genome in the link below. This is the project GCF_003957565.2 for Taeniopygia guttate (zebra finch) and the genome assembly bTaeGut1.4.pri which is a revised version 4 assembly of the male zebra finch bTaeGut1
+4.	I can also run a local query if I download the reference data. Download the Zebra Finch annotated genome in the link below. This is the project GCF_003957565.2 for Taeniopygia guttate (zebra finch) and the genome assembly bTaeGut1.4.pri which is a revised version 4 assembly of the male zebra finch bTaeGut1
 https://www.ncbi.nlm.nih.gov/datasets/genome/GCF_003957565.2/
 5.	Unzip the zip file.
 
 unzip ncbi_dataset.zip
 
-6.	Prepare the database before run Blast+.
+6.	Prepare the database before running Blast+.
 
 makeblastdb -in GCF_003957565.2_bTaeGut1.4.pri_genomic.fna -out db2/taegut_prot -dbtype prot 
 
