@@ -1,7 +1,7 @@
 # NOTES ON WGS ANALYSES FOR WRENS
 ## By Luis Daniel Montalvo
 
-This repository contains data quality control, read mapping, and genome-environment association analyses for 100 Campylorhynchus individuals sequenced with whole-genome resequencing. The sampled individuals span an environmental gradient of climate variables. The workflows and scripts provided here allow for quality filtering of raw reads, alignment to the reference genome, identification of climate-associated SNPs, and functional characterization of candidate adaptive genes. 
+This repository contains data quality control, read mapping, and genome-environment association analyses for 100 Campylorhynchus individuals sequenced with whole-genome resequencing. The sampled individuals span an environmental gradient of climate variables. The workflows and scripts provided here allow for quality filtering of raw reads, alignment to the reference genome, identification of climate-associated SNPs (WGS_LEA.Rmd), and functional characterization of candidate adaptive genes (WGS.gowgs.Rmd). 
 
 ## Downloading the Reference Genome
 
