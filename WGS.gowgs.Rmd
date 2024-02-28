@@ -1,0 +1,515 @@
+---
+title: "Wrens WGS: Descriptive Statistics"
+output: html_notebook
+---
+
+
+<center>
+
+<h1>Exploratory Analysis WGS of Wrens</h1>
+
+</center>
+
+<center>
+
+<h2>Luis Daniel Montalvo</h2>
+
+</center>
+
+
+### Introduction
+
+This is the general analysis of the WGS data for Campylorhynchus zoantus and fasciatus. Sequencing was done in ICBR at the university of Florida. Protocols for the data processing are explained in the document Notes on Molecular Analyses - wgs.docx. Here we analyze the resulting vcf file obtained with this protocol.
+
+
+```{r setup, include=FALSE}
+
+rm(list=ls())
+
+setwd("C:/Users/Daniel/Dropbox/Thesis/Molecular_Wrens/WGS/R/LEA")
+
+load("WGS_gowgs.RData")
+
+```
+
+### Descriptive Statistics
+
+```{r Descriptive Statistics, include=FALSE}    
+
+##############################################################################################################
+
+## Read sequence_report.txt file with the length of all chromosomes of Taeniopygia guttata (zebra finch)
+## This was downloaded from NCBI (https://www.ncbi.nlm.nih.gov/genome/?term=txid59729[orgn])
+sequence.report <- read.table("sequence_report.txt", header = T, sep = "\t", stringsAsFactors = F)
+View(sequence.report)
+class(sequence.report)
+
+## Remove rows with unknown chromosome
+seq.report <- sequence.report[sequence.report$Chromosome.name != "Un",]
+
+## Remove rows with empty "" chromosome
+seq.report <- seq.report[seq.report$Chromosome.name != "",]
+
+View(seq.report)
+
+## Read csv the LEA analysis results
+candidates.clim.go <- read.csv("candidates.clim.go.csv", header = T, sep = ",", stringsAsFactors = F)
+
+## Cehck dataframe with candidates SNPs
+View(candidates.clim.go)
+dim(candidates.clim.go)
+
+## Replace X in CHROM by W
+candidates.clim.go$CHROM[candidates.clim.go$CHROM == "X"] <- "W"
+ 
+## ADD column in candidates.clim.go with seq.length ( length of the chromosome)
+candidates.clim.go$seq.length <- seq.report$Seq.length[match(candidates.clim.go$CHROM, seq.report$Chromosome.name)]  
+
+## Remove rows in candidates.clim.go with NA or empty values in CHROM and POS columns
+candidates.clim.go <- candidates.clim.go[candidates.clim.go$CHROM != "NA" & candidates.clim.go$CHROM != "",]
+dim(candidates.clim.go)
+
+## Substract 1x10e6 to the POS column in a new column but the new value cannot be less than 0
+candidates.clim.go$start <- candidates.clim.go$POS - 1e4
+candidates.clim.go$start[candidates.clim.go$start < 0] <- 0
+
+## Add 1x10e6 to the POS column in a new column if end is greater than seq.length, then end will be only seq.length
+candidates.clim.go$end <- candidates.clim.go$POS + 1e4
+
+## If end is greater than seq.length, then end will be only seq.length
+candidates.clim.go$end <- ifelse(candidates.clim.go$end > candidates.clim.go$seq.length, candidates.clim.go$seq.length, candidates.clim.go$end)
+
+## Make a new column pasting CHROM, start and end columns separated by semicolon
+candidates.clim.go$chr.reg <- paste(candidates.clim.go$CHROM, candidates.clim.go$start, candidates.clim.go$end, sep=":")
+
+## Extract only the chromosomal regions
+chr.reg <- candidates.clim.go$chr.reg
+View(chr.reg)
+unique(length(chr.reg))
+
+
+##############################################################################################################
+
+
+## Installing Biomart
+if (!require("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+BiocManager::install("biomaRt")
+library(biomaRt)
+
+
+## Connect to the desired BioMart database. The biomart argument should be given a valid name
+ensembl <- biomaRt::useEnsembl(biomart = "genes")
+
+## Check the dataset names
+datasets <- biomaRt::listDatasets(ensembl)
+View(datasets)
+
+## Select the dataset
+mart <- biomaRt::useEnsembl(biomart = "ensembl",
+                  dataset = "tguttata_gene_ensembl")
+
+
+View(listAttributes(mart))
+
+gen.id <- biomaRt::getBM(attributes = c("entrezgene_id", "ensembl_gene_id", 
+                              "external_gene_name", 'go_id', 'hgnc_symbol', 
+                              "chromosome_name", "start_position","end_position"),
+                        filters = c('chromosomal_region'),
+                        values = chr.reg,
+                        mart = mart)
+
+## Checking results
+View(head(gen.id))
+View(gen.id)
+dim(gen.id)
+colnames(gen.id)
+length(unique(gen.id$external_gene_name))
+
+## NUmber of genes in the 7087 chromosomal regions
+length(unique(gen.id$hgnc_symbol))
+
+## Number of GO terms in the 7087 chromosomal regions
+length(unique(gen.id$go_id))
+
+## Check if ensembl_gene_id has NA
+sum(is.na(gen.id$ensembl_gene_id))
+
+library(dplyr)
+library(tidyr)
+
+## Summarize number of unique genes per chromosome in gen.id
+unique(gen.id$chromosome_name)
+chr.go.count <- gen.id  %>% group_by(chromosome_name) %>% summarize(n = n_distinct(go_id))
+View(chr.go.count)
+
+## Summarize number of unique go_id per chromosome in gen.id
+unique(gen.id$chromosome_name)
+chr.gen.count <- gen.id  %>% group_by(chromosome_name) %>% summarize(n = n_distinct(external_gene_name))
+View(chr.gen.count)
+
+## Merge candidates.clim.go and gen.id by chr.reg
+colnames(candidates.clim.go)
+head(candidates.clim.go)
+dim(candidates.clim.go)
+unique(candidates.clim.go$CHROM)
+
+colnames(gen.id)
+dim(gen.id)
+unique(gen.id$chromosome_name)
+
+length(unique(candidates.clim.go$CHROM))
+length(unique(gen.id$chromosome_name))
+length(unique(gen.id$hgnc_symbol))
+
+gen.id$chromosome_name <- as.character(gen.id$chromosome_name)
+candidates.clim.go$CHROM <- as.character(candidates.clim.go$CHROM)
+
+## Merge candidates.clim.go and gen.id by chr.reg
+candidates.clim.go.gen.id <- gen.id %>% left_join(candidates.clim.go, by = c("chromosome_name" = "CHROM"),relationship = "many-to-many") 
+
+## Check results
+dim(candidates.clim.go.gen.id)
+View(head(candidates.clim.go.gen.id))
+length(unique(candidates.clim.go.gen.id$chr.reg))
+length(unique(candidates.clim.go.gen.id$CHROM))
+length(unique(candidates.clim.go.gen.id$chromosome_name))
+length(unique(candidates.clim.go.gen.id$hgnc_symbol))
+colnames(candidates.clim.go.gen.id)
+
+## Remove rows if POS is lower than start_position or higher than end_position
+candidates.clim.go.gen.id.p <- candidates.clim.go.gen.id[candidates.clim.go.gen.id$start_position >= candidates.clim.go.gen.id$start & candidates.clim.go.gen.id$end_position <= candidates.clim.go.gen.id$end,]
+
+## Check results
+dim(candidates.clim.go.gen.id.p)
+View(head(candidates.clim.go.gen.id.p))
+length(unique(candidates.clim.go.gen.id.p$chr.reg))
+length(unique(candidates.clim.go.gen.id.p$CHROM))
+length(unique(candidates.clim.go.gen.id.p$chromosome_name))
+length(unique(candidates.clim.go.gen.id.p$go_id))
+length(unique(candidates.clim.go.gen.id.p$external_gene_name))
+length(unique(candidates.clim.go.gen.id.p$hgnc_symbol))
+colnames(candidates.clim.go.gen.id.p)
+
+## Summirize number of unique genes per var
+candidates.clim.go.gen.id.p %>% group_by(var) %>% summarize(n = n_distinct(external_gene_name))
+
+## Summirize number of unique go_id per var
+candidates.clim.go.gen.id.p %>% group_by(var) %>% summarize(n = n_distinct(go_id))
+
+
+################################################################################
+## Group number of genes by var
+colnames(candidates.clim.go.gen.id.p)
+dim(candidates.clim.go.gen.id.p)
+var.gen <- candidates.clim.go.gen.id.p %>% group_by(var) %>% dplyr::summarize(n = n_distinct(hgnc_symbol))
+var.go <- candidates.clim.go.gen.id.p %>% group_by(var) %>% dplyr::summarize(n = n_distinct(go_id))
+View(var.gen)
+View(var.go)
+
+## Write candidates.clim.go.gen.id.p as csv
+write.csv(candidates.clim.go.gen.id.p, file = "candidates.clim.go.gen.id.p.csv", row.names = FALSE)
+
+
+
+```
+
+
+
+```{r Over-representation test, include=FALSE}
+
+################################################################################
+
+## Installing clusterProfiler
+if (!require("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+
+BiocManager::install("clusterProfiler")
+BiocManager::install("AnnotationHub")
+BiocManager::install("rtracklayer")
+
+
+library(clusterProfiler)
+
+## Select uniques genes in gen.id
+gene.name <- unique(gen.id$hgnc_symbol)
+length(gene.name)
+go.cod <- unique(gen.id$go_id)
+
+## REmove row with empty "" in gene.name
+gene.name <- gene.name[gene.name != ""]
+go.cod <- go.cod[go.cod != ""]
+
+## Check length of gene.name
+length(gene.name)
+unique(gen.id$chromosome_name)
+
+## Check length of go.cod
+length(go.cod)
+
+
+## Get the Galllus gallus data base
+BiocManager::install("org.Gg.eg.db")
+library(org.Gg.eg.db)
+
+## Enrichment Analysis
+wrengo.g <- clusterProfiler::enrichGO(gene          = gene.name,
+                                    keyType = "SYMBOL",
+                                    OrgDb         = "org.Gg.eg.db",
+                                    ont           = "ALL",
+                                    pAdjustMethod = "bonferroni",
+                                    pvalueCutoff  = 0.05,
+                                    #qvalueCutoff  = 0.1,
+                                    readable      = TRUE)
+
+
+## Check results
+head(wrengo.g)
+class(wrengo.g)
+View(head(wrengo.g))
+
+## Converting to data.frame
+wrengo.dt <- as.data.frame(wrengo.g)
+
+## Checking reuslts in the dataframe
+View(wrengo.dt)
+colnames(wrengo.dt)
+head(wrengo.dt)
+length(unique(wrengo.dt$Description))
+length(unique(wrengo.dt$ID))
+
+## Filter wrengo.dt where Ontology is BP
+wrengo.bp <- wrengo.dt[wrengo.dt$ONTOLOGY == "BP",]
+View(wrengo.bp)
+length(unique(wrengo.bp$Description))
+length(unique(wrengo.bp$ID))
+
+## Select row in wrengo.bp with the lowest p.adjust value
+View(wrengo.bp[wrengo.bp$p.adjust == min(wrengo.bp$p.adjust),])
+
+## Filter wrengo.dt where Ontology is MF
+wrengo.mf <- wrengo.dt[wrengo.dt$ONTOLOGY == "MF",]
+View(wrengo.mf)
+length(unique(wrengo.mf$Description))
+length(unique(wrengo.mf$ID))
+
+## Select row in wrengo.mf with the lowest p.adjust value
+View(wrengo.mf[wrengo.mf$p.adjust == min(wrengo.mf$p.adjust),])
+
+
+## Filter wrengo.dt where Ontology is CC
+wrengo.cc <- wrengo.dt[wrengo.dt$ONTOLOGY == "CC",]
+View(wrengo.cc)
+length(unique(wrengo.cc$Description))
+length(unique(wrengo.cc$ID))
+
+## Select row in wrengo.cc with the lowest p.adjust value
+View(wrengo.cc[wrengo.cc$p.adjust == min(wrengo.cc$p.adjust),])
+
+
+## Plotting the results
+BiocManager::install("enrichplot")
+library(enrichplot)
+
+## dotplot
+dotplot(wrengo.g, showCategory=20)
+
+```
+
+
+
+```{r Over-representation test as previous section but with only PS, include=FALSE}
+
+## Obtainte unique genes for ps in candidates.clim.go.gen.id.p
+gene.name.ps <- unique(candidates.clim.go.gen.id.p[candidates.clim.go.gen.id.p$var == "PS",]$hgnc_symbol)
+length(x = gene.name.ps)
+
+## Enrichment Analysis
+wrengo.ps <- clusterProfiler::enrichGO(gene          = gene.name.ps,
+                                    keyType = "SYMBOL",
+                                    OrgDb         = "org.Gg.eg.db",
+                                    ont           = "ALL",
+                                    pAdjustMethod = "bonferroni",
+                                    pvalueCutoff  = 0.05,
+                                    #qvalueCutoff  = 0.1,
+                                    readable      = TRUE)
+
+## Check results
+head(wrengo.ps)
+class(wrengo.ps)
+View(wrengo.ps)
+
+## Converting to data.frame
+wrengo.dt.ps <- as.data.frame(wrengo.ps)
+
+## Checking reuslts in the dataframe
+View(wrengo.dt.ps)
+colnames(wrengo.dt.ps)
+head(wrengo.dt.ps)
+length(unique(wrengo.dt.ps$Description))
+length(unique(wrengo.dt.ps$ID))
+
+## Select row in wrengo.cc with the lowest p.adjust value
+View(wrengo.ps[wrengo.ps$p.adjust == min(wrengo.ps$p.adjust),])
+
+## Select row in wrengo.ps with the lowest Count value
+View(wrengo.ps[wrengo.ps$Count == max(wrengo.ps$Count),])
+
+## dotplot
+go.over.ps <- dotplot(wrengo.ps, showCategory=20, split=ONTOLOGY)
+
+library(ggplot2)
+
+## Export go.over.ps as jpg with ppi = 300 with high quilaty for scientific publication
+ggsave("go.over.ps.jpg", plot = go.over.ps, width = 15, height = 17, units = "cm", dpi = 300)
+
+```
+
+
+
+```{r Over-representation test as previous section but with only AMP, include=FALSE}
+
+## Obtainte unique genes for AMP in candidates.clim.go.gen.id.p
+gene.name.amp <- unique(candidates.clim.go.gen.id.p[candidates.clim.go.gen.id.p$var == "AMP",]$hgnc_symbol)
+length(x = gene.name.amp)
+
+## Enrichment Analysis
+wrengo.amp <- clusterProfiler::enrichGO(gene          = gene.name.amp,
+                                    keyType = "SYMBOL",
+                                    OrgDb         = "org.Gg.eg.db",
+                                    ont           = "ALL",
+                                    pAdjustMethod = "bonferroni",
+                                    pvalueCutoff  = 0.05,
+                                    #qvalueCutoff  = 0.1,
+                                    readable      = TRUE)
+
+## Check results
+head(wrengo.amp)
+class(wrengo.amp)
+View(wrengo.amp)
+
+## Converting to data.frame
+wrengo.dt.amp <- as.data.frame(wrengo.amp)
+
+## Checking reuslts in the dataframe
+View(wrengo.dt.amp)
+colnames(wrengo.dt.amp)
+head(wrengo.dt.amp)
+length(unique(wrengo.dt.amp$Description))
+length(unique(wrengo.dt.amp$ID))
+
+## Select row in wrengo.cc with the lowest p.adjust value
+View(wrengo.amp[wrengo.amp$p.adjust == min(wrengo.amp$p.adjust),])
+
+
+## Select row in wrengo.ps with the lowest Count value
+View(wrengo.amp[wrengo.amp$Count == max(wrengo.amp$Count),])
+
+## dotplot
+go.over.amp <- dotplot(wrengo.amp, showCategory=20)
+
+library(ggplot2)
+
+## Export go.over.ps as jpg with ppi = 300 with high quilaty for scientific publication
+ggsave("go.over.amp.jpg", plot = go.over.amp, width = 15, height = 17, units = "cm", dpi = 300)
+
+```
+
+
+
+
+```{r Over-representation test as previous section but with only amt, include=FALSE}
+
+## Obtainte unique genes for amt in candidates.clim.go.gen.id.p
+gene.name.amt <- unique(candidates.clim.go.gen.id.p[candidates.clim.go.gen.id.p$var == "AMT",]$hgnc_symbol)
+length(x = gene.name.amt)
+
+## remove empty "" from gene.name.amt
+gene.name.amt <- gene.name.amt[gene.name.amt != ""]
+
+View(gene.name.amt)
+
+
+## Enrichment Analysis
+wrengo.amt <- clusterProfiler::enrichGO(gene          = gene.name.amt,
+                                    keyType = "SYMBOL",
+                                    OrgDb         = "org.Gg.eg.db",
+                                    ont           = "ALL",
+                                    pAdjustMethod = "bonferroni",
+                                    pvalueCutoff  = 0.05,
+                                    #qvalueCutoff  = 0.1,
+                                    readable      = TRUE)
+
+## Check results
+head(wrengo.amt)
+class(wrengo.amt)
+View(wrengo.amt)
+
+## Converting to data.frame
+wrengo.dt.amt <- as.data.frame(wrengo.amt)
+
+## Checking reuslts in the dataframe
+View(wrengo.dt.amt)
+colnames(wrengo.dt.amt)
+head(wrengo.dt.amt)
+length(unique(wrengo.dt.amt$Description))
+length(unique(wrengo.dt.amt$ID))
+
+## Select row in wrengo.cc with the lowest p.adjust value
+View(wrengo.amt[wrengo.amt$p.adjust == min(wrengo.amt$p.adjust),])
+
+## dotplot
+go.over.amt <- dotplot(wrengo.amt, showCategory=20)
+
+
+
+```
+
+
+```{r Search Gene in literature, include=FALSE}
+
+## Genes in Literature associated with climate variability
+gene.lit <- c("ZNF397", "ZKscan1", "SCT", "MUC4", "CDHR5", "SLC25A33", "TEMEM201", "DRD4",  "DEAF1",
+"HIF1AN", "ANGP4", "ADAM9", "MDH1B", "SRF", "TXNRD2", "WNT7B", "MTOR", "PSMD2", "AHR1", "BMP transforming growth factor-b signaling pathway", 
+"MAP kinase pathway", "b-keratin genes", "BRACA1", "RND2", "CIITA", "ICO", "UBE2C", "Ecel1", "SLC23A2", "NOX4", "PIRT", "GR1N1", 
+"OC90", "PLA2G12B", "GPR17", "TNFRSF11A", "TLR7", "ZC3HAV1")
+
+
+
+
+
+colnames(candidates.clim.go.gen.id.p)
+
+## Search in candidates.clim.go.gen.id.p rows that contains elements in gene.lit
+gene.lit.candidates <- candidates.clim.go.gen.id.p[candidates.clim.go.gen.id.p$hgnc_symbol %in% gene.lit,]
+dim(gene.lit.candidates)
+View(gene.lit.candidates)
+unique(gene.lit.candidates$hgnc_symbol)
+
+
+
+AHR <- candidates.clim.go.gen.id.p[candidates.clim.go.gen.id.p$hgnc_symbol %in% "AHR",]
+View(AHR)
+
+## Number of unique chr.reg in AHR
+length(unique(AHR$chr.reg))
+
+NOX4 <- candidates.clim.go.gen.id.p[candidates.clim.go.gen.id.p$hgnc_symbol %in% "NOX4",]
+View(NOX4)
+
+FoxP1 <- candidates.clim.go.gen.id.p[candidates.clim.go.gen.id.p$hgnc_symbol %in% c("DRD4", "DEAF1"),]
+View(FoxP1)
+
+
+
+```
+
+
+
+```{r Saving, include=FALSE}
+
+save.image("WGS_go.RData")
+
+```
+
+
