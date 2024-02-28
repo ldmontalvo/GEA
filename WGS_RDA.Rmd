@@ -395,16 +395,13 @@ head(cand.p1)
 ## Writing the results
 write.csv(cand, file="cand.csv")
 
-
-
 ```
-
-
 
 
 ```{r Plotting, include=FALSE}
 
-
+## Plot m.rda with different colors for predictor
+plot(m.rda)
 
 ```
 
