@@ -1,0 +1,418 @@
+---
+title: "Wrens RDA: GEA"
+output: html_notebook
+---
+
+
+<center>
+
+<h1>Exploratory Analysis GEA of Wrens with RDA</h1>
+
+</center>
+
+<center>
+
+<h2>Luis Daniel Montalvo</h2>
+
+</center>
+
+
+### Introduction
+
+This is the general analysis of the WGS data for Campylorhynchus zoantus and fasciatus. Sequencing was done in ICBR at the university of Florida. Protocols for the data processing are explained in the document Notes on Molecular Analyses - wgs.docx. Here we analyze the resulting vcf file obtained with this protocol.
+
+
+```{r setup, include=FALSE}
+
+rm(list=ls())
+
+setwd("C:/Users/Daniel/Dropbox/Thesis/Molecular_Wrens/WGS/R/RDA")
+setwd("C:/Users/USER/Dropbox/Thesis/Molecular_Wrens/WGS/R/RDA")
+
+load("WGS_rda.RData")
+
+```
+
+
+
+```{r GETTING DATA, include=FALSE}
+
+install.packages("raster")
+library(raster)
+
+##################
+## Making POP STRUCTURE file for Tassel
+
+## Read samples names equivalents to the radseq data.
+wgs.qvalues <- read.csv("../Predictors/pop.struc.csv", sep=",", header=TRUE)
+head(wgs.qvalues)
+View(wgs.qvalues)
+
+## Writting the population structure files for TASSEL
+write.csv(wgs.qvalues[,c(1:2,9:13)],  file="wgs.qvalues.csv")
+
+
+##################
+##################
+
+## CLIMATE DATA
+
+## Getting name of groups and coodinates
+gr.coor <- wgs.qvalues[,c("Ind", "Lat", "Long")]
+colnames(gr.coor) <- c("Ind", "lon", "lat")
+head(gr.coor)
+
+## Making the coordinates numeric
+coor <- cbind(as.numeric(as.character(gr.coor$lon)), as.numeric(as.character(gr.coor$lat)))
+
+## Setting the coordinates system as Long/Lat
+install.packages("sp")
+library(sp)
+cord.dec = sp::SpatialPoints(cbind(coor[,2], coor[,1]), proj4string=CRS("+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84"))
+
+
+## Downloading CHELSA data
+Chelsa.Clim.download(parameter = "bio",
+                     bio.var =  c(1:19), 
+                     version.var = "1.2", 
+                     clipping = TRUE, 
+                     clip.extent = c(-112, -79, -7, 35), 
+                     buffer = 0, 
+                     convert.files.to.asc = FALSE, 
+                     stacking.data = TRUE, 
+                     combine.raw.zip = FALSE,
+                     delete.raw.data = FALSE,
+                     save.bib.file = TRUE)
+
+
+## Setting the directory where the raster was saved
+wd <- ("C:\\Users\\Daniel\\Dropbox\\Thesis\\Molecular_Wrens\\WGS\\R\\bio\\bio_V1.2\\")
+
+## Creating a list with the names of all raster files 
+list.raster <- list.files(wd, full.names = TRUE)
+
+## Reading and stacking the rasters
+stack.ch <- raster::stack(list.raster[1:19])
+
+## Extracting the values for the sampling points I have
+values.ch <- raster::extract(stack.ch, cord.dec)
+View(values.ch)
+
+## Naming the columns
+colnames(values.ch) <- c("AMT","MDR","ISO","TS","MTWM","MTCM","TAR","MTWetQ","MTDQ","MTWarQ","MTCQ","AMP","PWetM","PDM","PS","PWetQ","PDQ","PWarQ","PCQ")
+
+## Merging the coordinates, Chelsa values, population labels
+coor.clim.raw.ch <- cbind.data.frame(coordinates(coor), values.ch)
+colnames(coor.clim.raw.ch)[1:2] <- c("Long", "Lat")
+coor.clim.raw.ch <- cbind(gr.coor, coor.clim.raw.ch)
+clim <- merge(coor.clim.raw.ch, wgs.qvalues, by="Ind")
+clim <- clim[,c("Ind", "sampleMuseum", "lat", "AMT", "AMP", "PS")]
+head(clim)
+
+## Writting the climate data for TASSEL
+write.csv(clim,  file="clim.chelsa.csv")
+
+install.packages("PerformanceAnalytics")
+library(PerformanceAnalytics)
+
+# Plotting multiple correlations
+png("corr_19clim.jpg", width = 10000, height = 10000, units = "px", res=300)
+PerformanceAnalytics::chart.Correlation(coor.clim.raw.ch[,6:24], method = "pearson", histogram = TRUE, pch = 16)
+dev.off()
+
+#chart.Correlation(clim[,c( "AMT", "AMP", "PS")], method = "pearson", histogram = TRUE, pch = 16)
+
+##################
+## Climate of Worldclim
+# r <- getData("worldclim", var="bio", res=10)
+# r3 <- r[[c(1,12,15)]]
+# names(r3) <- c("AMT", "AMP", "PS")
+# colnames(cord.dec@coords) <- c("Y", "")
+# wgs.wclim <- raster::extract(r3, cord.dec@coords[,2:1])
+# wgs.wclim <- cbind.data.frame(gr.coor, wgs.wclim)
+# wgs.wclim <- merge(wgs.wclim, wgs.qvalues, by="Ind")
+# wgs.wclim <- wgs.wclim[,c("Ind", "sampleMuseum", "lat", "AMT", "AMP", "PS")]
+
+# head(wgs.wclim)
+
+## Writting the climate data for TASSEL
+# write.csv(wgs.wclim,  file="wgs.wclim.csv")
+
+## The coding as it will go in Tassel is this
+## CZ	CFPn	CFPs	CFF	CB
+## Q1	Q2	Q3	Q4	Q5
+
+
+```
+
+
+We carried out the imputations steps already when using LEA. We can use the same files to run the RDA.
+The files we need are the following:
+
+File with information of retained snps - wgs.wrens.vcfsnp
+The original vcf file - wgs.wrens.named.vcf
+The geno file - wgs.wrens.geno
+
+Code was taken and modified from:
+https://github.com/jdalapicolla/LOCAL_ADAPTATION.R/blob/master/4.04A_PARTIAL_RDA_GEA.R
+
+
+```{r DATA MANAGEMENT, include=FALSE}
+
+## Convert VCF to RAW in Ubuntu terminal
+
+## After imputation, the function produced a file with the information of the SNP that were 
+## retained. We will use this file to extract the information of the SNPs from the original vcf file.
+
+## Path to git folder where the wgs.wrens.vcfsnp file is located
+path2git <- "C:/Users/USER/Dropbox/Thesis/Molecular_Wrens/WGS/git/GEA/RDA/"
+
+## Read table wgs.wrens.vcfsnp at path2git
+wgs.wrens.vcfsnp <- read.table(paste0(path2git, "wgs.wrens.vcfsnp"), header = FALSE, sep = " ")
+head(wgs.wrens.vcfsnp)
+
+## Get the names of loci
+snps <- as.data.frame(wgs.wrens.vcfsnp[,3])
+dim(snps)
+head(snps)
+
+## We need the names of samples as they show in the geno file
+## Get path to vcf file
+path2vcf <- "C:/Users/USER/Dropbox/Thesis/Molecular_Wrens/WGS/R/Genotype/wgs.wrens.named.vcf"
+
+## Read vcf file
+wrens.vcf <- pegas::read.vcf(path2vcf)
+
+## Getting the names of samples 
+samples <- as.data.frame(rownames(wrens.vcf))
+View(samples)
+
+## Then we will get the data in geno format
+
+## Install LEA
+install.packages("LEA")
+
+## Read geno file
+gen.imp <- LEA::read.geno(paste(path2git, "wgs.wrens.geno", sep=""))
+dim(gen.imp)
+head(gen.imp[,1:5])
+
+## Add names of loci and samples
+colnames(gen.imp) <- snps[,1]
+rownames(gen.imp) <- samples[,1]
+
+## Data checking
+## Number of missing data
+sum(is.na(gen.imp)) #0
+class(gen.imp)
+
+## Get clim rows where Ind match samples
+head(clim)
+clim97 <- clim[clim$sampleMuseum %in% samples[,1],]
+head(clim97)
+View(clim97)
+rownames(clim97) <- clim97$Ind
+
+## Scale the variables:
+pred_scale = scale(clim97[,4:6])
+head(pred_scale)
+dim(pred_scale)
+
+#Renames cols and rows to graphics:
+rownames(pred_scale) <- clim97[,1]
+head(pred_scale)
+class(pred_scale)
+View(pred_scale)
+
+## Read the qvalues from Structure for the condition in the RDA
+
+## Path to wgs.qvalues.csv
+path2qvalues <- "C:/Users/USER/Dropbox/Thesis/Molecular_Wrens/WGS/R/LEA/wgs.qvalues.csv"
+
+## Read table wgs.qvalues.csv at path2qvalues
+qvalues <- read.table(path2qvalues, header = TRUE, sep = ",")
+head(qvalues)
+dim(qvalues)
+
+## Get rows in qvalues that match samples
+qvalues97 <- qvalues[qvalues$Ind %in% rownames(pred_scale),]
+qvalues97 <- qvalues97[,4:7]
+dim(qvalues97)
+class(qvalues97)
+View(qvalues97)
+rownames(qvalues97) <- rownames(pred_scale)
+
+## Write matrices to csv file
+write.csv(gen.imp, file="gen.imp.csv")
+write.csv(pred_scale, file="env.csv")
+write.csv(qvalues97, file="qvalues97.csv")
+
+```
+
+The following code was taken and modified from:
+https://popgen.nescent.org/2018-03-27_RDA_GEA.html
+
+```{r RDA, include=FALSE}
+
+install.packages("vegan")
+
+## RDA with mahalanobis distance
+m.rda <- vegan::rda(gen.imp ~ pred_scale + Condition(qvalues97[,1]))
+
+## Checking results
+m.rda
+
+## Adjusted R2
+vegan::RsquareAdj(m.rda)
+
+## Eigenvalues for the constrained axes reflect the variance explained by each canonical axis:
+summary(vegan::eigenvals(m.rda, model = "constrained"))
+
+screeplot(m.rda)
+
+```
+
+Variances explained: .02%
+
+"This low explanatory power is not surprising given that we expect that most of the SNPs in our dataset will not show 
+a relationship with the environmental predictors (e.g., most SNPs will be neutral)."
+
+
+```{r ANOVA FOR RDA, include=FALSE}
+
+## RDA model for significance using formal tests.
+## The null hypothesis is that no linear relationship exists between the SNP data and the environmental predictors.
+m.rda.full <- vegan::anova.cca(m.rda, parallel=getOption("mc.cores")) # default is permutation=999
+m.rda.full
+
+## Check each constrained axis for significance using the code below. 
+## For this test, each constrained axis is tested using all previous constrained axes as conditions.
+m.rda.axis <- vegan::anova.cca(m.rda, by="axis", parallel=getOption("mc.cores"))
+m.rda.axis
+
+## Checking Variance Inflation Factors for the predictor variables
+vegan::vif.cca(m.rda)
+
+```
+
+The results of the RDA show that the first axis is significant. The second and third axis are not significant. 
+The VIF for the predictor variables is low, which means that the predictor variables are not correlated with each other. 
+This is good because it means that the predictor variables are not redundant. 
+
+```{r GETTING SNPs CADIDATES, include=FALSE}
+
+names(m.rda)
+names(m.rda$terms)
+
+## Identify candidate SNPs involved in local adaptation
+load.rda <- vegan::scores(m.rda, choices=c(1:3), display="species")  # Species scores for the first three constrained axes
+
+## Checking the loadings
+hist(load.rda[,1], main="Loadings on RDA1")
+
+## Formula for getting outliers
+outliers <- function(x,z){
+  lims <- mean(x) + c(-1, 1) * z * sd(x)     # find loadings +/-z sd from mean loading     
+  x[x < lims[1] | x > lims[2]]               # locus names in these tails
+}
+
+## Only the first axis was significant
+cand1 <- outliers(load.rda[,1],3)
+
+## Getting the number of candidates
+ncand <- length(cand1)
+
+## Getting the names of the candidates
+cand1 <- cbind.data.frame(rep(1,times=length(cand1)), names(cand1), unname(cand1))
+colnames(cand1) <- c("axis","snp","loading")
+cand1$snp <- as.character(cand1$snp)
+
+## Check duplicates in axis 1
+length(cand1$snp[duplicated(cand1$snp)])
+
+head(cand1)
+
+```
+
+
+```{r CORRELATION, include=FALSE}
+
+## Correlation between the predictors and the candidate SNPs
+foo <- matrix(nrow=(ncand), ncol=3)  # 3 columns for 3 predictors
+colnames(foo) <- c("AMT","AMP","PS")
+
+for (i in 1:length(cand1$snp)) {
+  nam <- cand1[i,2]
+  snp.gen <- gen.imp[,nam]
+  foo[i,] <- apply(pred_scale,2,function(x) cor(x,snp.gen))
+}
+
+cand <- cbind.data.frame(cand,foo)
+head(cand)
+
+## Getting the variable with the highest correlation
+for (i in 1:length(cand$snp)) {
+  bar <- cand[i,]
+  cand[i,7] <- names(which.max(abs(bar[4:6]))) # gives the variable
+  cand[i,8] <- max(abs(bar[4:6]))              # gives the correlation
+}
+
+colnames(cand)[7] <- "predictor"
+colnames(cand)[8] <- "correlation"
+
+table(cand$predictor) 
+
+###########################3
+
+## Repeat the function above but adding p-values of correlation instead of coefficient
+foo.pv <- matrix(nrow=(ncand), ncol=3)  # 3 columns for 3 predictors
+colnames(foo.pv) <- c("AMT.p","AMP.p","PS.p")
+
+for (i in 1:length(cand1$snp)) {
+  nam <- cand1[i,2]
+  snp.gen <- gen.imp[,nam]
+  foo.pv[i,] <- apply(pred_scale,2,function(x) cor.test(x,snp.gen)$p.value)
+}
+
+cand <- cbind.data.frame(cand,foo.pv)
+head(cand)
+
+## Getting the SNPs that have a significant correlation with the all the predictors
+cand.p3 <- cand[apply(cand[,9:11], 1, function(x) all(x < 0.05)),]
+dim(cand)
+dim(cand.p3)
+
+## Getting the SNPs that have a significant correlation with two significant predictors
+cand.p2 <- cand[apply(cand[,9:11], 1, function(x) sum(x < 0.05) > 1),]
+dim(cand.p2)
+head(cand.p2)
+
+## Getting the SNPs that have a significant correlation with one significant predictor
+cand.p1 <- cand[apply(cand[,9:11], 1, function(x) sum(x < 0.05) > 0),]
+dim(cand.p1)
+head(cand.p1)
+
+## Writing the results
+write.csv(cand, file="cand.csv")
+
+
+```
+
+
+
+
+```{r Plotting, include=FALSE}
+
+
+
+```
+
+
+
+```{r Saving, include=FALSE}
+
+save.image("WGS_rda.RData")
+
+```
+
+
