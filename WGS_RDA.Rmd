@@ -406,7 +406,6 @@ plot(m.rda)
 ```
 
 
-
 ```{r Saving, include=FALSE}
 
 save.image("WGS_rda.RData")
